@@ -1,0 +1,163 @@
+
+/*
+    SE1990_NJ
+    V1.0-11/09/2026
+    Lê Duy - HE194188
+*/
+
+// Prisma schema for Thierlavier Shop (SWD392)
+// Modules: Authentication, Profile, Delivery Address, Guest Verification, User & Role RBAC (UC-31 to UC-40)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserStatus {
+  PENDING_VERIFICATION
+  ACTIVE
+  LOCKED
+}
+
+enum UserRole {
+  ROLE_CUSTOMER
+  ROLE_STAFF
+  ROLE_ADMIN
+}
+
+enum OtpType {
+  EMAIL_VERIFICATION
+  PASSWORD_RESET
+  GUEST_CHECKOUT
+}
+
+model User {
+  id                  Int               @id @default(autoincrement())
+  email               String            @unique @db.VarChar(255)
+  passwordHash        String            @map("password_hash") @db.VarChar(255)
+  fullName            String            @map("full_name") @db.VarChar(150)
+  phoneNumber         String?           @map("phone_number") @db.VarChar(15)
+  status              UserStatus        @default(PENDING_VERIFICATION)
+  role                UserRole          @default(ROLE_CUSTOMER)
+  failedLoginAttempts Int               @default(0) @map("failed_login_attempts")
+  lockoutUntil        DateTime?         @map("lockout_until")
+  emailVerifiedAt     DateTime?         @map("email_verified_at")
+  createdAt           DateTime          @default(now()) @map("created_at")
+  updatedAt           DateTime          @updatedAt @map("updated_at")
+
+  // Relationships
+  profile             CustomerProfile?
+  addresses           DeliveryAddress[]
+  refreshTokens       RefreshToken[]
+  actorAuditLogs      AuditLog[]        @relation("ActorAuditLogs")
+  targetAuditLogs     AuditLog[]        @relation("TargetAuditLogs")
+
+  @@index([email])
+  @@index([role, status])
+  @@map("users")
+}
+
+model CustomerProfile {
+  id             Int      @id @default(autoincrement())
+  userId         Int      @unique @map("user_id")
+  avatarUrl      String?  @map("avatar_url") @db.VarChar(500)
+  preferredFit   String?  @map("preferred_fit") @db.VarChar(50)
+  favoriteColor  String?  @map("favorite_color") @db.VarChar(50)
+  heightCm       Float?   @map("height_cm")
+  weightKg       Float?   @map("weight_kg")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("customer_profiles")
+}
+
+model DeliveryAddress {
+  id              Int      @id @default(autoincrement())
+  userId          Int      @map("user_id")
+  recipientName   String   @map("recipient_name") @db.VarChar(150)
+  phoneNumber     String   @map("phone_number") @db.VarChar(15)
+  provinceCity    String   @map("province_city") @db.VarChar(100)
+  district        String   @db.VarChar(100)
+  ward            String   @db.VarChar(100)
+  detailedAddress String   @map("detailed_address") @db.VarChar(255)
+  isDefault       Boolean  @default(false) @map("is_default")
+  isDeleted       Boolean  @default(false) @map("is_deleted")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isDeleted])
+  @@map("delivery_addresses")
+}
+
+model RefreshToken {
+  id         Int      @id @default(autoincrement())
+  userId     Int      @map("user_id")
+  tokenHash  String   @unique @map("token_hash") @db.VarChar(255)
+  jti        String   @db.VarChar(100)
+  deviceInfo String?  @map("device_info") @db.VarChar(255)
+  ipAddress  String?  @map("ip_address") @db.VarChar(45)
+  isRevoked  Boolean  @default(false) @map("is_revoked")
+  expiresAt  DateTime @map("expires_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRevoked])
+  @@map("refresh_tokens")
+}
+
+model OtpVerification {
+  id                  Int      @id @default(autoincrement())
+  targetIdentifier    String   @map("target_identifier") @db.VarChar(255)
+  otpCodeHash         String   @map("otp_code_hash") @db.VarChar(255)
+  otpType             OtpType  @map("otp_type")
+  attempts            Int      @default(0)
+  isConsumed          Boolean  @default(false) @map("is_consumed")
+  expiresAt           DateTime @map("expires_at")
+  resendCooldownUntil DateTime @map("resend_cooldown_until")
+  createdAt           DateTime @default(now()) @map("created_at")
+
+  @@index([targetIdentifier, otpType, isConsumed])
+  @@map("otp_verifications")
+}
+
+model GuestCheckoutVerification {
+  id                Int      @id @default(autoincrement())
+  phoneNumber       String   @map("phone_number") @db.VarChar(15)
+  verificationToken String   @unique @map("verification_token") @db.VarChar(255)
+  isVerified        Boolean  @default(false) @map("is_verified")
+  expiresAt         DateTime @map("expires_at")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  @@index([phoneNumber, isVerified])
+  @@map("guest_checkout_verifications")
+}
+
+model AuditLog {
+  id                  Int      @id @default(autoincrement())
+  actorId             Int?     @map("actor_id")
+  targetEntity        String   @map("target_entity") @db.VarChar(100)
+  targetId            Int?     @map("target_id")
+  action              String   @db.VarChar(100)
+  oldValue            Json?    @map("old_value")
+  newValue            Json?    @map("new_value")
+  justificationReason String?  @map("justification_reason") @db.Text
+  ipAddress           String?  @map("ip_address") @db.VarChar(45)
+  createdAt           DateTime @default(now()) @map("created_at")
+
+  actor               User?    @relation("ActorAuditLogs", fields: [actorId], references: [id], onDelete: SetNull)
+  target              User?    @relation("TargetAuditLogs", fields: [targetId], references: [id], onDelete: SetNull)
+
+  @@index([actorId, action])
+  @@index([targetEntity, targetId])
+  @@map("audit_logs")
+}
+
